@@ -135,38 +135,39 @@ export const updateUserImage = async (c: Context) => {
             return c.json({ error: 'No valid imageUrl provided' }, 400);
         }
 
-        let buffer: ArrayBuffer | SharedArrayBuffer;
-        let contentType: string;
+        let buffer: Buffer;
 
         if (typeof imageUrl === 'string') {
-            buffer = Buffer.from(imageUrl, 'base64').buffer;
-            contentType = 'image/jpeg';
+            buffer = Buffer.from(imageUrl, 'base64');
         } else if (imageUrl instanceof File) {
-            buffer = await imageUrl.arrayBuffer();
-            contentType = imageUrl.type; 
+            buffer = Buffer.from(await imageUrl.arrayBuffer());
         } else {
             return c.json({ error: 'Invalid imageUrl type provided' }, 400);
         }
 
-        const metadata = {
-            contentType
-        };
+        // Upload the image to Cloudinary
+        const result: cloudinary.UploadApiResponse = await new Promise((resolve, reject) => {
+            cloudinary.v2.uploader.upload_stream(
+                { folder: `users/${userId}` },
+                (error, result) => {
+                    if (error || !result) reject(error || new Error('Upload failed'));
+                    else resolve(result);
+                }
+            ).end(buffer);
+        });
 
-        const storageRef = ref(storage, `users/${userId}/profile-image.jpg`); 
-        const snapshot = await uploadBytes(storageRef, buffer, metadata);
-        const downloadUrl = await getDownloadURL(snapshot.ref);
-
-        const updatedUser = await updateOneUser(userId, { imageUrl: downloadUrl });
+        const updatedUser = await updateOneUser(userId, { imageUrl: result.url });
 
         if (updatedUser.modifiedCount === 0) {
             return c.json({ message: 'User not found or no changes made' }, 404);
         }
 
-        return c.json({ message: `User ${userId} image updated`, imageUrl: downloadUrl });
+        return c.json({ message: `User ${userId} image updated`, imageUrl: result.url });
     } catch (error) {
         return handleError(c, error);
     }
 };
+
 
 /**
  * Deletes a user from the database.
