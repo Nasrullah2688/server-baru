@@ -7,4 +7,4 @@ declare module 'hono' {
             email: string;
         };
     }
-} 
+}  

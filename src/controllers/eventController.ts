@@ -7,6 +7,14 @@ import { ObjectId } from "mongodb";
 import { handleError } from "../middleware/handleError";
 import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import { storage } from "../lib/firebase";
+import cloudinary from 'cloudinary';
+
+cloudinary.v2.config({
+    cloud_name: process.env.CLOUDINARY_CLOUDNAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
 
 const eventSchema = z.object({
     name: z.string().min(10, "Name cannot be empty"),
@@ -98,14 +106,19 @@ export const createEvent = async (c: Context) => {
         }
 
         const buffer = await file.arrayBuffer();
-        const fileName = `${userId}-${eventData.name}_${file.name}`;
-        const storageRef = ref(storage, `events/${fileName}`);
-        const snapshot = await uploadBytes(storageRef, buffer);
-        const url = await getDownloadURL(snapshot.ref);
+        const uploadResult: cloudinary.UploadApiResponse = await new Promise((resolve, reject) => {
+            cloudinary.v2.uploader.upload_stream(
+                { folder: `events/${userId}` },
+                (error, result) => {
+                    if (error || !result) reject(error || new Error('Upload failed'));
+                    else resolve(result);
+                }
+            ).end(Buffer.from(buffer));
+        });
 
         const newEvent = await EventModel.oneCreate({
             ...eventData,
-            imageUrl: url,
+            imageUrl: uploadResult.url,
             time: new Date(eventData.time),
             userId,
             createdAt: new Date(),
@@ -133,10 +146,16 @@ export const updateEvent = async (c: Context) => {
         if (eventData.imageUrl instanceof File) {
             const file = eventData.imageUrl;
             const buffer = await file.arrayBuffer();
-            const fileName = `${userId}-${eventData.name}_${file.name}`;
-            const storageRef = ref(storage, `events/${fileName}`);
-            const snapshot = await uploadBytes(storageRef, buffer);
-            url = await getDownloadURL(snapshot.ref);
+            const uploadResult: cloudinary.UploadApiResponse = await new Promise((resolve, reject) => {
+                cloudinary.v2.uploader.upload_stream(
+                    { folder: `events/${userId}` },
+                    (error, result) => {
+                        if (error || !result) reject(error || new Error('Upload failed'));
+                        else resolve(result);
+                    }
+                ).end(Buffer.from(buffer));
+            });
+            url = uploadResult.url;
         }
 
         const update = await EventModel.oneUpdate(new ObjectId(id), userId, { 
@@ -203,14 +222,18 @@ export const addParticipant = async (c: Context) => {
         // Menghasilkan QR code dalam format buffer
         const qrBuffer = await QRCode.toBuffer(qrValue, { type: 'png', width: 300 });
 
-        // Mengunggah QR code ke penyimpanan
-        const fileName = `${eventId}-${userId}-qrcode.png`;
-        const storageRef = ref(storage, `qrcodes/${fileName}`);
-        const snapshot = await uploadBytes(storageRef, qrBuffer);
-        const qrUrl = await getDownloadURL(snapshot.ref);
+        // Mengunggah QR code ke Cloudinary
+        const uploadResult: cloudinary.UploadApiResponse = await new Promise((resolve, reject) => {
+            cloudinary.v2.uploader.upload_stream(
+                { folder: `qrcodes/${eventId}` },
+                (error, result) => {
+                    if (error || !result) reject(error || new Error('Upload failed'));
+                    else resolve(result);
+                }
+            ).end(qrBuffer);
+        });
 
-        // Simpan URL QR ke dalam database atau kirimkan ke pengguna
-        // Misalnya: tambahkan ke data participant acara atau kirim email
+        const qrUrl = uploadResult.url;
 
         return c.json({ message: 'Peserta berhasil ditambahkan', qrUrl });
     } catch (error) {
